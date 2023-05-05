@@ -391,6 +391,7 @@ int main(int argc, char* argv[])
 	int *displs = displs = (int *)malloc(size*sizeof(int));
 	int count = lines / size;
 	int restante = lines % size;
+	printf("llega1");
 	if (rank = 0){
 		
 		for (int i = 0; i < size; i++){
@@ -401,8 +402,9 @@ int main(int argc, char* argv[])
 			else displs[i] += restante * samples;
 		}
 	}
-
+	printf("llega2");
 	local_matrix = (float *)malloc(sendcnts[rank]*sizeof(double));
+	printf("llega3");
     MPI_Scatterv(&data, sendcnts, displs, MPI_DOUBLE, local_matrix, sendcnts[rank], MPI_DOUBLE, 0, MPI_COMM_WORLD);
 	int count_info = K * samples;
 	MPI_Bcast(&centroids, count_info, MPI_FLOAT, 0, MPI_COMM_WORLD);
