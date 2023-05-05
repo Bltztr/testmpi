@@ -403,7 +403,7 @@ int main(int argc, char* argv[])
 		}
 	}
 	printf("llega2");
-	local_matrix = (float *)malloc(sendcnts[rank]*sizeof(float));
+	local_matrix = (float *)malloc(sendcnts[rank]*sizeof(float)*2);
 	printf("llega3");
     MPI_Scatterv(&data, sendcnts, displs, MPI_FLOAT, local_matrix, sendcnts[rank], MPI_FLOAT, 0, MPI_COMM_WORLD);
 	int count_info = K * samples;
