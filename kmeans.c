@@ -125,10 +125,9 @@ int writeResult(int *classMap, int lines, const char* filename)
     
     if ((fp=fopen(filename,"wt"))!=NULL)
     {
-		#pragma omp parallel for ordered schedule(guided)
         for(int i=0; i<lines; i++)
         {
-			#pragma omp ordered
+
         	fprintf(fp,"%d\n",classMap[i]);
         }
         fclose(fp);  
@@ -149,7 +148,7 @@ void initCentroids(const float *data, float* centroids, int* centroidPos, int sa
 {
 	int i;
 	int idx;
-	#pragma omp parallel for shared( centroidPos )
+
 	for(i=0; i<K; i++)
 	{
 		idx = centroidPos[i];
@@ -163,7 +162,7 @@ Calculo de la distancia euclidea
 float euclideanDistance(float *point, float *center, int samples)
 {
 	float dist=0.0;
-	#pragma parallel for shared(point, center) reduction(+:dist)
+
 	for(int i=0; i<samples; i++){
 		dist+= (point[i]-center[i])*(point[i]-center[i]);
 	}
@@ -174,76 +173,33 @@ float euclideanDistance(float *point, float *center, int samples)
 /*
 Funcion de clasificacion, asigna una clase a cada elemento de data
 */
-int classifyPoints(float *data, float *centroids, int *classMap, int lines, int samples, int K, MPI_Comm comm){
-    int i,j;
-    int class;
-    float dist, minDist;
-    int changes=0;
-    
-    int rank, size;
-    MPI_Comm_rank(comm, &rank);
-    MPI_Comm_size(comm, &size);
-    
-    int chunk_size = lines / size;
-    int remainder = lines % size;
-    
-    int *sendcounts = (int *) malloc(size * sizeof(int));
-    int *displs = (int *) malloc(size * sizeof(int));
-    for(i=0; i<size; i++){
-        sendcounts[i] = chunk_size * samples;
-        if(i < remainder){
-            sendcounts[i] += samples;
-        }
-        displs[i] = i * chunk_size * samples;
-        if(i < remainder){
-            displs[i] += i * samples;
-        }else{
-            displs[i] += remainder * (chunk_size + 1) * samples + (i - remainder) * chunk_size * samples;
-        }
-    }
-    
-    float *data_chunk = (float *) malloc(sendcounts[rank] * sizeof(float));
-    MPI_Scatterv(data, sendcounts, displs, MPI_FLOAT, data_chunk, sendcounts[rank], MPI_FLOAT, 0, comm);
-    
-    int *classMap_chunk = (int *) malloc(chunk_size * sizeof(int));
-    MPI_Scatter(classMap, chunk_size, MPI_INT, classMap_chunk, chunk_size, MPI_INT, 0, comm);
-    
-    for(i=0; i<chunk_size; i++)
-    {
-        class=1;
-        minDist=FLT_MAX;
-        for(j=0; j<K; j++)
-        {
-            dist=euclideanDistance(&data_chunk[i*samples], &centroids[j*samples], samples);
-            if(dist < minDist)
-            {
-                minDist=dist;
-                class=j+1;
-            }
-        }
-        if(classMap_chunk[i]!=class)
-        {
-            changes++;
-        }
-        classMap_chunk[i]=class;
-    }
-    
-    int *changes_array = (int *) malloc(size * sizeof(int));
-    MPI_Allgather(&changes, 1, MPI_INT, changes_array, 1, MPI_INT, comm);
-    changes = 0;
-    for(i=0; i<size; i++){
-        changes += changes_array[i];
-    }
-    
-    MPI_Gatherv(classMap_chunk, chunk_size, MPI_INT, classMap, sendcounts, displs, MPI_INT, 0, comm);
-    
-    free(sendcounts);
-    free(displs);
-    free(data_chunk);
-    free(classMap_chunk);
-    free(changes_array);
-    
-    return(changes);
+int classifyPoints(float *data, float *centroids, int *classMap, int lines, int samples, int K){
+	int i,j;
+	int class;
+	float dist, minDist;
+	int changes=0;
+
+
+	for(i=0; i<lines; i++)
+	{
+		class=1;
+		minDist=FLT_MAX;
+		for(j=0; j<K; j++)
+		{
+			dist=euclideanDistance(&data[i*samples], &centroids[j*samples], samples);
+			if(dist < minDist)
+			{
+				minDist=dist;
+				class=j+1;
+			}
+		}
+		if(classMap[i]!=class)
+		{
+			changes++;
+		}
+		classMap[i]=class;
+	}
+	return(changes);
 }
 
 /*
@@ -275,7 +231,7 @@ float recalculateCentroids(float *data, float *centroids, int *classMap, int lin
 	}
 	float sizeAux = K*samples;
 
-	#pragma omp parallel for shared(pointsPerClass, auxCentroids) private(j)
+
 	for(i=0; i<K; i++) 
 	{
 		for(j=0; j<samples; j++){
