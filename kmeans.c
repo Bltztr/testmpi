@@ -387,12 +387,12 @@ int main(int argc, char* argv[])
 
 	// Distribuye puntos entre los procesos
 	float *local_matrix;
+	int * local_classMap;
 	int *sendcnts = (int *)malloc(size*sizeof(int));
 	int *displs = displs = (int *)malloc(size*sizeof(int));
 	int count = lines / size;
 	int restante = lines % size;
-	printf("llega1");
-	if (rank = 0){
+	if (rank == 0){
 		
 		for (int i = 0; i < size; i++){
 			sendcnts[i] = count * samples;
@@ -402,17 +402,52 @@ int main(int argc, char* argv[])
 			else displs[i] += restante * samples;
 		}
 	}
-	printf("llega2");
+	
+	MPI_Bcast(sendcnts, size, MPI_INT, 0, MPI_COMM_WORLD);
+	
 	local_matrix = (float *)malloc(sendcnts[rank]*sizeof(float));
-	printf("llega3");
-    MPI_Scatterv(data, sendcnts, displs, MPI_FLOAT, local_matrix, sendcnts[rank], MPI_FLOAT, 0, MPI_COMM_WORLD);
+	
+	MPI_Scatterv(data, sendcnts, displs, MPI_FLOAT, local_matrix, sendcnts[rank], MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+
+
+
+	
+
+	
+	// Calculo de "lines" de cada proceso
+	if(rank == 0){
+		for (int i = 0; i < size; i++){
+				sendcnts[i] = count;
+				if (i < restante) sendcnts[i] += 1;
+				displs[i] = i * count;
+				if (i < restante) displs[i] += i;
+				else displs[i] += restante;
+			}
+	}
+	
+	MPI_Bcast(sendcnts, size, MPI_INT, 0, MPI_COMM_WORLD);
+
+	
+	int info [3]; 
+	if(rank == 0) {
+		info[0] = K;
+		info[1] = lines;
+		info[2] = samples;
+	}
+
+	MPI_Bcast(info, 3, MPI_INT, 0, MPI_COMM_WORLD);
+
+	if (rank != 0){
+		K = info[0];
+		lines = info[1];
+		samples = info[2];
+		//Asigna memoria que faltaba de los demas procesos
+		centroids = (float*)calloc(K*samples,sizeof(float));
+	}
+	local_classMap = (int*)calloc(sendcnts[rank],sizeof(int));
 	int count_info = K * samples;
-	MPI_Bcast(&centroids, count_info, MPI_FLOAT, 0, MPI_COMM_WORLD);
-	int info[3] = {K, lines, samples};
-	MPI_Bcast(&info, 3, MPI_INT, 0, MPI_COMM_WORLD);
-	K = info[0];
-	lines = info[1];
-	samples = info[2];
+	MPI_Bcast(centroids, count_info, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
 	int it=0;
 	int changes = 0;
@@ -420,36 +455,32 @@ int main(int argc, char* argv[])
 	float distCent;
 	float max_distCent;
 	int finished = 0;
+
 	do{
 		it++;
 		//Calcula la distancia desde cada punto al centroide
 		//Asigna cada punto al centroide mas cercano
-		changes=classifyPoints(local_matrix, centroids, classMap, lines, samples, K);
+		
+		changes=classifyPoints(local_matrix, centroids, local_classMap, sendcnts[rank], samples, K);
+		
 		//Recalcula los centroides: calcula la media dentro de cada centoide
-		distCent=recalculateCentroids(local_matrix, centroids, classMap, lines, samples, K);
-		printf("\n[%d] Cambios de cluster: %d\tMax. dist. centroides: %f", it, changes, distCent);
-		MPI_Barrier(MPI_COMM_WORLD);
-		if (rank == 0){
-			MPI_Reduce(&changes, &total_changes, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-			MPI_Reduce(&distCent, &max_distCent, 1,  MPI_FLOAT, MPI_MAX, 0, MPI_COMM_WORLD);
-			if (!((total_changes>minChanges) && (it<maxIterations) && (max_distCent>maxThreshold)))
-				finished = 1;
+		MPI_Gatherv(local_classMap, sendcnts[rank], MPI_INT, classMap, sendcnts, displs, MPI_INT, 0, MPI_COMM_WORLD);
+		if (rank == 0) {
+			distCent=recalculateCentroids(data, centroids, classMap, lines, samples, K);
+			printf("\n[%d] Cambios de cluster: %d\tMax. dist. centroides: %f", it, changes, distCent);
 		}
+		MPI_Bcast(centroids, count_info, MPI_FLOAT, 0, MPI_COMM_WORLD);
+		MPI_Barrier(MPI_COMM_WORLD);
+		MPI_Reduce(&changes, &total_changes, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+		MPI_Reduce(&distCent, &max_distCent, 1,  MPI_FLOAT, MPI_MAX, 0, MPI_COMM_WORLD);
+		
+		if ((rank == 0) && !((total_changes>minChanges) && (it<maxIterations) && (max_distCent>maxThreshold)))
+			finished = 1;
 		MPI_Bcast(&finished, 1, MPI_INT, 0, MPI_COMM_WORLD);
+		
 	} while(finished == 0);
 
-	int *total_classMap;
-	if(rank == 0)
-		total_classMap = (int*)calloc(lines,sizeof(int));
-
-	for (int i = 0; i < size; i++){
-			sendcnts[i] = count;
-			if (i < restante) sendcnts[i] += 1;
-			displs[i] = i * count;
-			if (i < restante) displs[i] += i;
-			else displs[i] += restante;
-		}
-		MPI_Gatherv(classMap, sendcnts[rank], MPI_INT, total_classMap, sendcnts, displs, MPI_INT, 0, MPI_COMM_WORLD);
+	MPI_Gatherv(local_classMap, sendcnts[rank], MPI_INT, classMap, sendcnts, displs, MPI_INT, 0, MPI_COMM_WORLD);
 
 	//Condiciones de fin de la ejecucion
 	if(rank == 0){
@@ -472,6 +503,7 @@ int main(int argc, char* argv[])
 			exit(error);
 		}
 	}
+	
 
 
 	//END CLOCK*****************************************
@@ -482,19 +514,29 @@ int main(int argc, char* argv[])
 	fflush(stdout);
 	//**************************************************
 	//START CLOCK***************************************
+	MPI_Barrier(MPI_COMM_WORLD);
 	start = MPI_Wtime();
 	//**************************************************
 
 
 	//Liberacion de la memoria dinamica
-	free(data);
-	free(classMap);
-	free(centroidPos);
 	free(centroids);
+	free(sendcnts);
+	free(displs);
+	free(local_matrix);
+	free(local_classMap);
+	if(rank == 0){
+		free(data);
+		free(classMap);
+		free(centroidPos);
+	}	
+
 
 	//END CLOCK*****************************************
+	MPI_Barrier(MPI_COMM_WORLD);
 	end = MPI_Wtime();
-	printf("\n\nLiberacion: %f segundos\n", (end - start));
+	if (rank == 0)
+		printf("\n\nLiberacion: %f segundos\n", (end - start));
 	fflush(stdout);
 	//***************************************************/
 	MPI_Finalize();
